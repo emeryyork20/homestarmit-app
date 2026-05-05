@@ -1,604 +1,246 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  Briefcase, 
-  Clock, 
-  ArrowLeft, 
-  CheckCircle2, 
-  Camera, 
-  Phone,
-  MapPin,
-  Navigation,
-  FileText, 
-  ShieldCheck, 
-  Activity, 
-  Layers, 
-  MessageSquare, 
-  Send, 
-  Wrench, 
-  ChevronRight, 
-  User, 
-  Lock, 
-  Calendar,
-  LogOut,
-  Settings,
-  Mail,
-  Sun,
-  Moon,
-  TrendingUp,
-  History,
-  Sparkles,
-  Loader2,
-  AlertTriangle
-} from 'lucide-react';
-
-// --- GEMINI API INTEGRATION ---
-const apiKey = ""; // Environment provided
-
-async function callGemini(prompt, systemInstruction = "") {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
-  
-  const payload = {
-    contents: [{ parts: [{ text: prompt }] }],
-    systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined
-  };
-
-  for (let i = 0; i < 5; i++) {
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (!response.ok) throw new Error('API Error');
-      const result = await response.json();
-      return result.candidates?.[0]?.content?.parts?.[0]?.text;
-    } catch (e) {
-      const delay = Math.pow(2, i) * 1000;
-      await new Promise(resolve => setTimeout(resolve, delay));
-    }
-  }
-  throw new Error("Failed to reach Gemini after retries.");
-}
-
-// --- DATA ---
-const MOCK_JOBS = [
-  { 
-    id: 'j1', 
-    jobNumber: '26-1845_WTR', 
-    customerName: 'Alice Johnson', 
-    address: '123 River Road, Conyers, GA 30012',
-    phoneDisplay: '(404) 555-0123',
-    scheduledTime: '08:00 AM',
-    type: 'WTR',
-    priority: 'High',
-    notes: 'Standing water in basement. Lockbox code: 1234. Customer requested 30 min arrival notice.'
-  },
-  { 
-    id: 'j2', 
-    jobNumber: '26-2819_FIRE', 
-    customerName: 'Bob Smith', 
-    address: '456 Oak Lane, Atlanta, GA 30303',
-    phoneDisplay: '(678) 555-9876',
-    scheduledTime: '10:00 AM',
-    type: 'FIRE',
-    priority: 'Normal',
-    notes: 'Structural soot cleaning. Client is sensitive to smoke odor. Wear boot covers.'
-  },
-  { 
-    id: 'j3', 
-    jobNumber: '26-3001_MOLD', 
-    customerName: 'Charlie Davis', 
-    address: '789 Pine Street, Decatur, GA 30030',
-    phoneDisplay: '(770) 555-4321',
-    scheduledTime: '12:00 PM',
-    type: 'MOLD',
-    priority: 'Normal',
-    notes: 'Containment already set up. Need to start HEPA vacuuming.'
-  },
-];
-
-const CHECKLIST_ITEMS = [
-  { id: 'equip', label: "EQUIPMENT INVENTORY", desc: "Scan and log all assets on site", icon: <Wrench size={16}/> },
-  { id: 'matter', label: "MATTERPORT SCAN", desc: "360 coverage of affected area", icon: <Camera size={16}/> },
-  { id: 'sketch', label: "STRUCTURAL SKETCH", desc: "Update moisture reading map", icon: <FileText size={16}/> },
-  { id: 'photos', label: "VISUAL DOCUMENTATION", desc: "Source, damage & transit photos", icon: <Layers size={16}/> },
-  { id: 'auth', label: "CONTRACTUAL SIGNOFF", desc: "Digital Work Authorization", icon: <ShieldCheck size={16}/> }
-];
-
-const INITIAL_MESSAGES = [
-  { id: 1, user: 'Sarah (Admin)', role: 'Dispatch', text: 'Heavy traffic on I-20 West. Divert to Hwy 78 if possible.', time: '08:15 AM', self: false },
-  { id: 2, user: 'You', role: 'Lead Tech', text: 'Arrived at Johnson site. Extraction starting now.', time: '09:02 AM', self: true },
-];
-
-export default function App() {
-  const [isDarkMode, setIsDarkMode] = useState(true);
-  const [profile, setProfile] = useState({
-    name: 'Technician Name',
-    phone: '(555) 000-0000',
-    email: 'tech@homestargroup.com',
-    avatar: null
-  });
-
-  const [currentUser, setCurrentUser] = useState(null);
-  const [currentScreen, setCurrentScreen] = useState('login');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [chatMessage, setChatMessage] = useState('');
-  const [messages, setMessages] = useState(INITIAL_MESSAGES);
-  
-  const [jobStates, setJobStates] = useState({});
-  const [activeChecklistJob, setActiveChecklistJob] = useState(null);
-  const [completedItems, setCompletedItems] = useState({});
-  const [selectedJob, setSelectedJob] = useState(null);
-  const [isClockedIn, setIsClockedIn] = useState(false);
-  const [totalShiftTime, setTotalShiftTime] = useState(0);
-
-  // Gemini specific state
-  const [isGeneratingSafety, setIsGeneratingSafety] = useState(false);
-  const [aiSafetyReport, setAiSafetyReport] = useState(null);
-  const [isAiThinkingChat, setIsAiThinkingChat] = useState(false);
-
-  useEffect(() => {
-    let interval;
-    if (isClockedIn) {
-      interval = setInterval(() => {
-        setTotalShiftTime(p => p + 1);
-        setJobStates(prev => {
-          const next = { ...prev };
-          let updated = false;
-          Object.keys(next).forEach(id => {
-            if (next[id]?.active) {
-              next[id] = { ...next[id], time: (next[id].time || 0) + 1 };
-              updated = true;
-            }
-          });
-          return updated ? next : prev;
-        });
-      }, 1000);
-    }
-    return () => clearInterval(interval);
-  }, [isClockedIn]);
-
-  const formatDuration = (s) => {
-    const h = Math.floor(s / 3600);
-    const m = Math.floor((s % 3600) / 60);
-    const sec = s % 60;
-    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
-  };
-
-  const handleLogin = (e) => {
-    e.preventDefault();
-    if (username && password) {
-      setCurrentUser({ id: 'u1', username, role: 'OPERATOR', station: 'UNIT-026' });
-      setCurrentScreen('dashboard');
-    }
-  };
-
-  const handleSendMessage = (textOverride) => {
-    const msg = textOverride || chatMessage;
-    if (!msg.trim()) return;
-    setMessages([...messages, {
-      id: Date.now(),
-      user: 'You',
-      role: 'OPERATOR',
-      text: msg,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      self: true
-    }]);
-    setChatMessage('');
-  };
-
-  const generateSafetyBrief = async () => {
-    if (!selectedJob) return;
-    setIsGeneratingSafety(true);
-    setAiSafetyReport(null);
-    try {
-      const prompt = `Based on these job details, provide a concise field technician safety brief and required PPE list:
-      Type: ${selectedJob.type}
-      Customer: ${selectedJob.customerName}
-      Notes: ${selectedJob.notes}
-      
-      Format as JSON: { "precautions": ["item1", "item2"], "ppe": ["item1", "item2"], "pro_tip": "string" }`;
-      
-      const response = await callGemini(prompt, "You are a disaster restoration safety expert for Homestar Group. Provide professional, concise field advice.");
-      const cleaned = response.replace(/```json|```/g, '').trim();
-      setAiSafetyReport(JSON.parse(cleaned));
-    } catch (err) {
-      console.error(err);
-      setAiSafetyReport({ precautions: ["Error generating brief"], ppe: [], pro_tip: "Manual assessment required." });
-    } finally {
-      setIsGeneratingSafety(false);
-    }
-  };
-
-  const generateAiChatResponse = async () => {
-    setIsAiThinkingChat(true);
-    try {
-      const lastMessages = messages.slice(-3).map(m => `${m.user}: ${m.text}`).join('\n');
-      const prompt = `Based on our current chat history, suggest a professional status update or a follow-up question I should send to dispatch.
-      History:
-      ${lastMessages}
-      
-      Return only the text of the suggested message. Keep it short and professional for a field technician.`;
-      
-      const response = await callGemini(prompt, "You are an AI assistant for a field technician in restoration. Be concise and professional.");
-      setChatMessage(response.trim());
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsAiThinkingChat(false);
-    }
-  };
-
-  const toggleJob = (jobId) => {
-    const currentState = jobStates[jobId];
-    if (currentState?.active) {
-      setActiveChecklistJob(jobId);
-    } else {
-      setJobStates(prev => ({
-        ...prev,
-        [jobId]: { ...prev[jobId], active: true, time: prev[jobId]?.time || 0 }
-      }));
-    }
-  };
-
-  const finalizeJob = (jobId) => {
-    setJobStates(prev => ({
-      ...prev,
-      [jobId]: { ...prev[jobId], active: false, completed: true }
-    }));
-    setActiveChecklistJob(null);
-    setCurrentScreen('jobs');
-  };
-
-  const getJobColor = (type, variant = 'border') => {
-    switch(type) {
-      case 'FIRE': return variant === 'border' ? 'border-red-500' : variant === 'bg' ? 'bg-red-500' : 'text-red-500';
-      case 'WTR': return variant === 'border' ? 'border-blue-500' : variant === 'bg' ? 'bg-blue-500' : 'text-blue-500';
-      case 'MOLD': return variant === 'border' ? 'border-emerald-500' : variant === 'bg' ? 'bg-emerald-500' : 'text-emerald-500';
-      default: return variant === 'border' ? 'border-blue-500' : variant === 'bg' ? 'bg-blue-500' : 'text-blue-500';
-    }
-  };
-
-  const themeClass = isDarkMode ? 'bg-black text-white' : 'bg-gray-50 text-gray-900';
-  const cardClass = isDarkMode ? 'bg-[#0c0c0c] border-white/10 shadow-2xl' : 'bg-white border-gray-200 shadow-md';
-  const inputClass = isDarkMode ? 'bg-white/5 border-white/10 text-white placeholder:text-white/10' : 'bg-gray-100 border-gray-300 text-gray-900 placeholder:text-gray-400';
-
-  const Header = ({ title, sub, back = true, action = null, onBackOverride = null, leftAction = null }) => (
-    <div className={`border-b ${isDarkMode ? 'bg-black border-white/10' : 'bg-white border-gray-200'} p-5 flex items-center justify-between shrink-0 z-20 sticky top-0`}>
-      <div className="flex items-center gap-4 overflow-hidden">
-        {back && (
-          <button 
-            onClick={onBackOverride || (() => setCurrentScreen('dashboard'))} 
-            className={`w-10 h-10 flex items-center justify-center border rounded-xl active:scale-95 transition-all shrink-0 ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-100 border-gray-200'}`}
-          >
-            <ArrowLeft size={18} className={isDarkMode ? 'text-white' : 'text-gray-900'} />
-          </button>
-        )}
-        {leftAction && (
-          <div className="shrink-0">{leftAction}</div>
-        )}
-        <div className="overflow-hidden">
-          {title && <h1 className={`text-sm font-extrabold tracking-tight uppercase leading-none truncate ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>{title}</h1>}
-          {sub && <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mt-1 truncate">{sub}</p>}
-        </div>
-      </div>
-      {action && <div className="shrink-0 flex gap-2">{action}</div>}
-    </div>
-  );
-
-  const renderLogin = () => (
-    <div className="h-full flex flex-col bg-black p-8 relative overflow-hidden">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(37,99,235,0.1),transparent)] pointer-events-none"></div>
-      <div className="flex-1 flex flex-col justify-center items-center w-full z-10">
-        <div className="w-full text-center flex flex-col items-center">
-          <p className="text-[10px] font-black text-blue-500 tracking-[0.8em] uppercase mb-2 -mr-[0.8em]">THE</p>
-          <h1 className="text-4xl xs:text-5xl font-black text-white tracking-widest leading-[0.9] text-center select-none">HOMESTAR<br />GROUP</h1>
-          <div className="flex items-center gap-3 mt-8 w-full justify-center max-w-[280px]">
-            <div className="h-[1px] flex-1 bg-white/10"></div>
-            <p className="text-[9px] font-black text-white/40 tracking-[0.4em] uppercase whitespace-nowrap -mr-[0.4em]">Field Operations</p>
-            <div className="h-[1px] flex-1 bg-white/10"></div>
-          </div>
-        </div>
-        <div className="w-full mt-14 space-y-4 max-w-[280px]">
-          <form onSubmit={handleLogin} className="space-y-3">
-            <div className="relative group">
-              <User className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-blue-500 transition-colors" size={16} />
-              <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="OPERATOR ID" className="w-full bg-white/5 border border-white/10 rounded-xl p-4 pl-12 text-white font-bold text-xs tracking-widest focus:border-blue-500 outline-none transition-all" />
-            </div>
-            <div className="relative group">
-              <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-blue-500 transition-colors" size={16} />
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="ACCESS KEY" className="w-full bg-white/5 border border-white/10 rounded-xl p-4 pl-12 text-white font-bold text-xs tracking-widest focus:border-blue-500 outline-none transition-all" />
-            </div>
-            <button type="submit" className="w-full bg-blue-600 text-white font-black py-4 rounded-xl text-[10px] tracking-[0.25em] uppercase hover:bg-blue-500 active:scale-[0.97] transition-all shadow-xl shadow-blue-900/40 mt-2">Verify Identity</button>
-          </form>
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderDashboard = () => (
-    <div className={`h-full flex flex-col ${themeClass}`}>
-      <Header 
-        title={null} 
-        sub={null} 
-        back={false} 
-        leftAction={
-          <button 
-            onClick={() => setCurrentScreen('settings')} 
-            className={`w-10 h-10 flex items-center justify-center border rounded-xl active:scale-95 transition-all shrink-0 ${isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-gray-100 border-gray-200 text-gray-900'}`}
-          >
-            <Settings size={20} />
-          </button>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Homestar Field App</title>
+    <!-- React and Babel for browser-side execution -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0a0a0a;
+            margin: 0;
+            overflow: hidden;
         }
-        action={
-          <button onClick={() => setCurrentScreen('chat')} className="relative p-2.5 bg-blue-600 rounded-xl shadow-lg active:scale-95 transition-all">
-            <MessageSquare size={20} className="text-white" />
-            <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-white rounded-full border-2 border-blue-600"></span>
-          </button>
-        } 
-      />
-      <div className="p-5 space-y-5 overflow-y-auto flex-1">
-        <div className={`${cardClass} p-6 rounded-[2rem] border relative overflow-hidden`}>
-          <div className="relative z-10">
-            <div className="flex items-center gap-2 mb-4">
-               <div className={`w-2 h-2 rounded-full ${isClockedIn ? 'bg-blue-500 animate-pulse' : 'bg-gray-400'}`}></div>
-               <p className={`text-[10px] font-extrabold uppercase tracking-widest ${isDarkMode ? 'text-white/40' : 'text-gray-500'}`}>{isClockedIn ? 'Operational Session Active' : 'Shift Standby'}</p>
-            </div>
-            <h2 className="text-5xl font-black tracking-tighter mb-6">{formatDuration(totalShiftTime)}</h2>
-            <div className={`flex gap-6 border-t pt-4 ${isDarkMode ? 'border-white/5' : 'border-gray-100'}`}>
-              <div><p className={`text-[8px] font-black uppercase tracking-widest mb-1 ${isDarkMode ? 'text-white/20' : 'text-gray-400'}`}>Callsign</p><p className="text-xs font-bold text-blue-600 uppercase">{currentUser?.username || 'GUEST'}</p></div>
-              <div><p className={`text-[8px] font-black uppercase tracking-widest mb-1 ${isDarkMode ? 'text-white/20' : 'text-gray-400'}`}>Station</p><p className="text-xs font-bold text-blue-600 uppercase">{currentUser?.station || 'ST-00'}</p></div>
-            </div>
-          </div>
-          <Activity size={160} className="absolute -right-8 -bottom-8 text-blue-600/5 pointer-events-none" />
-        </div>
-        <button onClick={() => setIsClockedIn(!isClockedIn)} className={`w-full py-5 rounded-2xl font-black text-xs uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-3 border shadow-xl ${isClockedIn ? 'bg-white text-black border-white shadow-white/10' : 'bg-blue-600 text-white border-blue-600 shadow-blue-900/40'}`}>{isClockedIn ? <LogOut size={18}/> : <Clock size={18}/>}{isClockedIn ? 'CLOCK OUT' : 'START SHIFT'}</button>
-        <div className="space-y-3 pt-2">
-          <h4 className={`text-[10px] font-black uppercase tracking-widest px-1 ${isDarkMode ? 'text-white/30' : 'text-gray-400'}`}>Operational Access</h4>
-          <button onClick={() => setCurrentScreen('jobs')} className={`w-full flex items-center gap-4 p-5 border rounded-[1.5rem] hover:scale-[1.02] transition-all text-left ${cardClass}`}><div className="w-12 h-12 bg-blue-600 text-white flex items-center justify-center rounded-2xl shrink-0 shadow-lg shadow-blue-600/20"><Briefcase size={22} /></div><div className="flex-1 overflow-hidden"><h3 className="text-sm font-extrabold tracking-tight uppercase">Today's Jobs</h3><p className={`text-[10px] font-bold uppercase tracking-widest mt-0.5 ${isDarkMode ? 'text-white/30' : 'text-gray-500'}`}>{MOCK_JOBS.length} Assigned Taskings</p></div><ChevronRight size={18} className="text-blue-600 shrink-0" /></button>
-          <button onClick={() => setCurrentScreen('timesheet')} className={`w-full flex items-center gap-4 p-5 border rounded-[1.5rem] hover:scale-[1.02] transition-all text-left ${cardClass}`}><div className="w-12 h-12 bg-blue-600/10 text-blue-600 flex items-center justify-center rounded-2xl shrink-0"><Calendar size={22} /></div><div className="flex-1 overflow-hidden"><h3 className="text-sm font-extrabold tracking-tight uppercase">Timesheet</h3><p className={`text-[10px] font-bold uppercase tracking-widest mt-0.5 ${isDarkMode ? 'text-white/30' : 'text-gray-500'}`}>{formatDuration(totalShiftTime)} Logged Today</p></div><ChevronRight size={18} className="text-blue-600 shrink-0" /></button>
-        </div>
-      </div>
-    </div>
-  );
 
-  const renderJobs = () => (
-    <div className={`h-full flex flex-col ${themeClass}`}>
-      <Header title="Mission List" sub="Today's Jobs" />
-      <div className="p-5 space-y-4 pb-10 overflow-y-auto flex-1">
-        {MOCK_JOBS.map(job => {
-          const state = jobStates[job.id];
-          const typeColor = getJobColor(job.type, 'text');
-          const borderColor = getJobColor(job.type, 'border');
-          return (
-            <div key={job.id} className={`${cardClass} border-l-4 ${borderColor} rounded-2xl p-5 relative transition-all duration-300`}>
-              <div className="flex justify-between items-start mb-4">
-                <div className="overflow-hidden">
-                  <div className="flex items-center gap-2"><span className={`text-[10px] font-black tracking-widest uppercase ${typeColor}`}>{job.jobNumber}</span><span className={`text-[8px] font-black px-1.5 py-0.5 rounded ${isDarkMode ? 'bg-white/10 text-white' : 'bg-gray-100 text-gray-600'}`}>{job.type}</span></div>
-                  <h3 className="text-lg font-extrabold tracking-tight mt-1 uppercase truncate">{job.customerName}</h3>
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        @keyframes pulse-soft {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .animate-pulse-soft { animation: pulse-soft 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        // --- MOCK DATA ---
+        const MOCK_JOBS = [
+            { id: 'j1', jobNumber: '26-1845_WTR', customerName: 'Alice Johnson', address: '123 River Road, Conyers, GA 30012', phoneDisplay: '(404) 555-0123', scheduledTime: '08:00 AM', type: 'WTR', notes: 'Standing water in basement.' },
+            { id: 'j2', jobNumber: '26-2819_FIRE', customerName: 'Bob Smith', address: '456 Oak Lane, Atlanta, GA 30303', phoneDisplay: '(678) 555-9876', scheduledTime: '10:00 AM', type: 'FIRE', notes: 'Structural soot cleaning.' },
+            { id: 'j3', jobNumber: '26-3001_MOLD', customerName: 'Charlie Davis', address: '789 Pine Street, Decatur, GA 30030', phoneDisplay: '(770) 555-4321', scheduledTime: '12:00 PM', type: 'MOLD', notes: 'Containment already set up.' }
+        ];
+
+        // Simple Icon Component Helper
+        const Icon = ({ name, size = 20, className = "" }) => {
+            return <i data-lucide={name} style={{ width: size, height: size }} className={className}></i>;
+        };
+
+        const App = () => {
+            const [currentScreen, setCurrentScreen] = useState('login');
+            const [isDarkMode, setIsDarkMode] = useState(true);
+            const [isClockedIn, setIsClockedIn] = useState(false);
+            const [totalShiftTime, setTotalShiftTime] = useState(0);
+            const [jobStates, setJobStates] = useState({});
+            const [selectedJob, setSelectedJob] = useState(null);
+
+            // Re-render icons when screen changes
+            useEffect(() => {
+                if (window.lucide) {
+                    window.lucide.createIcons();
+                }
+            });
+
+            // Clock Logic
+            useEffect(() => {
+                let interval;
+                if (isClockedIn) {
+                    interval = setInterval(() => setTotalShiftTime(t => t + 1), 1000);
+                }
+                return () => clearInterval(interval);
+            }, [isClockedIn]);
+
+            const formatTime = (s) => {
+                const h = Math.floor(s / 3600).toString().padStart(2, '0');
+                const m = Math.floor((s % 3600) / 60).toString().padStart(2, '0');
+                const sec = (s % 60).toString().padStart(2, '0');
+                return `${h}:${m}:${sec}`;
+            };
+
+            // Shared Layout Components
+            const Header = ({ showBack = true, onBack = () => setCurrentScreen('dashboard') }) => (
+                <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-black/50 backdrop-blur-md sticky top-0 z-50">
+                    <button 
+                        onClick={() => showBack ? onBack() : setCurrentScreen('settings')}
+                        className="w-10 h-10 flex items-center justify-center rounded-xl bg-white/5 border border-white/10 active:scale-95 transition-all"
+                    >
+                        <Icon name={showBack ? "arrow-left" : "settings"} size={18} className="text-white" />
+                    </button>
+                    
+                    {/* COMMAND CENTER AND NAME REMOVED AS REQUESTED */}
+                    <div className="flex-1"></div>
+
+                    <button 
+                        onClick={() => setCurrentScreen('chat')}
+                        className="w-10 h-10 flex items-center justify-center rounded-xl bg-blue-600 active:scale-95 transition-all shadow-lg shadow-blue-600/20"
+                    >
+                        <Icon name="message-square" size={18} className="text-white" />
+                    </button>
                 </div>
-                {state?.completed ? <div className="bg-emerald-500 p-1.5 rounded-full shadow-lg shadow-emerald-500/30"><CheckCircle2 size={16} className="text-white" /></div> : <div className="text-right shrink-0 ml-2"><p className={`text-[8px] font-black uppercase tracking-widest leading-none ${isDarkMode ? 'text-white/20' : 'text-gray-400'}`}>Arrival</p><p className="text-sm font-extrabold mt-1">{job.scheduledTime}</p></div>}
-              </div>
-              <div className={`flex items-center gap-2 mb-5 overflow-hidden ${isDarkMode ? 'text-white/40' : 'text-gray-500'}`}><MapPin size={14} className="shrink-0 text-blue-600" /><span className="text-xs font-bold truncate uppercase">{job.address}</span></div>
-              <button onClick={() => { setSelectedJob(job); setAiSafetyReport(null); setCurrentScreen('details'); }} className={`w-full py-4 rounded-xl font-extrabold text-[11px] tracking-widest uppercase transition-all shadow-md ${state?.completed ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' : 'bg-blue-600 text-white shadow-blue-900/20 active:scale-95'}`}>{state?.completed ? 'VIEW ARCHIVE' : 'INITIATE PROTOCOL'}</button>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
+            );
 
-  const renderJobDetails = () => {
-    const job = selectedJob;
-    if (!job) return null;
-    const state = jobStates[job.id];
-    const typeColor = getJobColor(job.type, 'text');
+            // Screen: Login
+            if (currentScreen === 'login') {
+                return (
+                    <div className="h-full flex flex-col bg-black text-white p-8 items-center justify-center text-center">
+                        <p className="text-[10px] font-black tracking-[0.8em] text-blue-500 uppercase mb-2">THE</p>
+                        <h1 className="text-5xl font-black tracking-widest leading-[0.9] mb-12">HOMESTAR<br/>GROUP</h1>
+                        <div className="w-full max-w-xs space-y-4">
+                            <div className="bg-white/5 border border-white/10 rounded-2xl p-4 text-left">
+                                <p className="text-[8px] font-black text-white/30 tracking-widest uppercase mb-1">OPERATOR ID</p>
+                                <p className="text-sm font-bold text-white/50">UNIT-026</p>
+                            </div>
+                            <button 
+                                onClick={() => setCurrentScreen('dashboard')}
+                                className="w-full py-5 bg-blue-600 rounded-2xl font-black text-xs tracking-[0.2em] uppercase shadow-2xl shadow-blue-900/40 active:scale-95 transition-all"
+                            >
+                                Verify Identity
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
 
-    return (
-      <div className={`h-full flex flex-col ${themeClass}`}>
-        <Header title="Job File" sub={job.jobNumber} onBackOverride={() => setCurrentScreen('jobs')} />
-        <div className="p-5 space-y-6 overflow-y-auto flex-1">
-          <section className={`${cardClass} p-6 rounded-[2rem] border shadow-xl`}>
-            <div className="flex justify-between items-start mb-6">
-              <div className="overflow-hidden">
-                <p className={`${typeColor} text-[10px] font-black uppercase tracking-widest mb-1`}>{job.type} Investigation</p>
-                <h2 className="text-2xl font-black uppercase tracking-tighter leading-tight truncate">{job.customerName}</h2>
-              </div>
-              <div className="text-right shrink-0 ml-4">
-                <div className="bg-blue-600/10 px-3 py-1.5 rounded-xl">
-                  <p className="text-blue-600 text-[9px] font-black uppercase tracking-widest mb-0.5">Time On Site</p>
-                  <p className={`text-sm font-mono font-bold leading-none ${state?.active ? 'text-blue-600' : 'text-gray-400'}`}>{state?.time ? formatDuration(state.time) : '00:00:00'}</p>
+            // Screen: Dashboard
+            if (currentScreen === 'dashboard') {
+                return (
+                    <div className="h-full flex flex-col bg-black text-white overflow-y-auto no-scrollbar">
+                        <Header showBack={false} />
+                        <div className="p-6 space-y-6">
+                            {/* Stats Card */}
+                            <div className="bg-[#0c0c0c] border border-white/10 rounded-[2.5rem] p-8 relative overflow-hidden">
+                                <div className="relative z-10">
+                                    <div className="flex items-center gap-2 mb-4">
+                                        <div className={`w-2 h-2 rounded-full ${isClockedIn ? 'bg-blue-500 animate-pulse' : 'bg-white/20'}`}></div>
+                                        <p className="text-[10px] font-black text-white/30 uppercase tracking-widest">
+                                            {isClockedIn ? 'Operational' : 'Shift Standby'}
+                                        </p>
+                                    </div>
+                                    <h2 className="text-6xl font-black tracking-tighter mb-6">{formatTime(totalShiftTime)}</h2>
+                                    <div className="flex gap-6 border-t border-white/5 pt-4">
+                                        <div><p className="text-[8px] font-black text-white/20 uppercase tracking-widest">Callsign</p><p className="text-xs font-bold text-blue-500">UNIT-026</p></div>
+                                        <div><p className="text-[8px] font-black text-white/20 uppercase tracking-widest">Station</p><p className="text-xs font-bold text-blue-500">HQ-NORTH</p></div>
+                                    </div>
+                                </div>
+                                <Icon name="activity" size={120} className="absolute -right-6 -bottom-6 text-white/[0.02]" />
+                            </div>
+
+                            <button 
+                                onClick={() => setIsClockedIn(!isClockedIn)}
+                                className={`w-full py-5 rounded-2xl font-black text-xs tracking-[0.2em] uppercase transition-all flex items-center justify-center gap-3 border ${isClockedIn ? 'bg-white text-black border-white shadow-white/10' : 'bg-blue-600 text-white border-blue-600 shadow-blue-900/40'}`}
+                            >
+                                <Icon name={isClockedIn ? "log-out" : "clock"} size={18} />
+                                {isClockedIn ? 'Clock Out' : 'Start Shift'}
+                            </button>
+
+                            <div className="space-y-3">
+                                <h4 className="text-[10px] font-black text-white/20 uppercase tracking-widest px-2">Operational Access</h4>
+                                <button onClick={() => setCurrentScreen('jobs')} className="w-full flex items-center gap-4 p-5 bg-[#0c0c0c] border border-white/5 rounded-3xl active:scale-[0.98] transition-all text-left">
+                                    <div className="w-12 h-12 bg-blue-600 text-white flex items-center justify-center rounded-2xl shrink-0 shadow-lg shadow-blue-600/20">
+                                        <Icon name="briefcase" size={24} />
+                                    </div>
+                                    <div className="flex-1">
+                                        <h3 className="text-sm font-extrabold uppercase">Today's Jobs</h3>
+                                        <p className="text-[10px] font-bold text-white/30 uppercase mt-0.5">{MOCK_JOBS.length} Assigned Taskings</p>
+                                    </div>
+                                    <Icon name="chevron-right" size={18} className="text-blue-600" />
+                                </button>
+                                
+                                <button onClick={() => setCurrentScreen('timesheet')} className="w-full flex items-center gap-4 p-5 bg-[#0c0c0c] border border-white/5 rounded-3xl active:scale-[0.98] transition-all text-left">
+                                    <div className="w-12 h-12 bg-white/5 text-blue-600 flex items-center justify-center rounded-2xl shrink-0">
+                                        <Icon name="calendar" size={24} />
+                                    </div>
+                                    <div className="flex-1">
+                                        <h3 className="text-sm font-extrabold uppercase">Timesheet</h3>
+                                        <p className="text-[10px] font-bold text-white/30 uppercase mt-0.5">View Weekly Logs</p>
+                                    </div>
+                                    <Icon name="chevron-right" size={18} className="text-blue-600" />
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            // Screen: Job List
+            if (currentScreen === 'jobs') {
+                return (
+                    <div className="h-full flex flex-col bg-black text-white">
+                        <Header />
+                        <div className="p-6 space-y-4 overflow-y-auto no-scrollbar">
+                            {MOCK_JOBS.map(job => (
+                                <div key={job.id} className="bg-[#0c0c0c] border-l-4 border-blue-600 border-white/10 rounded-2xl p-5 active:scale-[0.98] transition-all" onClick={() => { setSelectedJob(job); setCurrentScreen('details'); }}>
+                                    <div className="flex justify-between items-start mb-4">
+                                        <div>
+                                            <p className="text-blue-500 text-[10px] font-black uppercase tracking-widest">{job.jobNumber}</p>
+                                            <h3 className="text-lg font-black uppercase tracking-tight mt-1">{job.customerName}</h3>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="text-[8px] font-black text-white/20 uppercase">Arrival</p>
+                                            <p className="text-sm font-bold mt-0.5">{job.scheduledTime}</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2 text-white/40 mb-5">
+                                        <Icon name="map-pin" size={14} className="text-blue-600" />
+                                        <span className="text-[10px] font-bold uppercase truncate">{job.address}</span>
+                                    </div>
+                                    <button className="w-full py-4 bg-blue-600 text-white rounded-xl font-black text-[10px] tracking-widest uppercase">Initiate Protocol</button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            }
+
+            // Fallback for screens not fully implemented in this demo
+            return (
+                <div className="h-full flex flex-col bg-black text-white">
+                    <Header />
+                    <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
+                        <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mb-6">
+                            <Icon name="construction" size={32} className="text-blue-500" />
+                        </div>
+                        <h2 className="text-xl font-black uppercase tracking-tight">Access Restricted</h2>
+                        <p className="text-xs text-white/30 uppercase tracking-widest mt-2">Section Under Development</p>
+                        <button onClick={() => setCurrentScreen('dashboard')} className="mt-8 px-8 py-4 bg-white text-black rounded-xl font-black text-[10px] uppercase tracking-widest">Return to Base</button>
+                    </div>
                 </div>
-              </div>
-            </div>
-            <div className="space-y-4 mb-8">
-              <div className="flex items-start gap-4 p-3 rounded-2xl bg-gray-500/5"><MapPin size={18} className="text-blue-600 mt-1 shrink-0" /><div><p className={`text-[8px] font-black uppercase tracking-widest ${isDarkMode ? 'text-white/20' : 'text-gray-400'}`}>Site Address</p><p className="text-[11px] font-bold uppercase mt-0.5">{job.address}</p></div></div>
-              <div className="flex items-start gap-4 p-3 rounded-2xl bg-gray-500/5"><Phone size={18} className="text-blue-600 mt-1 shrink-0" /><div><p className={`text-[8px] font-black uppercase tracking-widest ${isDarkMode ? 'text-white/20' : 'text-gray-400'}`}>Contact Number</p><p className="text-[11px] font-bold uppercase mt-0.5">{job.phoneDisplay}</p></div></div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <a href={`tel:${job.phoneDisplay}`} className="bg-blue-600/10 border border-blue-600/20 py-4 flex items-center justify-center gap-3 rounded-2xl active:bg-blue-600 active:text-white transition-all text-blue-600"><Phone size={18} /><span className="text-[11px] font-black uppercase tracking-widest">Connect</span></a>
-              <a href={`https://maps.google.com?q=${encodeURIComponent(job.address)}`} target="_blank" rel="noopener noreferrer" className="bg-blue-600/10 border border-blue-600/20 py-4 flex items-center justify-center gap-3 rounded-2xl active:bg-blue-600 active:text-white transition-all text-blue-600"><Navigation size={18} /><span className="text-[11px] font-black uppercase tracking-widest">Route</span></a>
-            </div>
-          </section>
+            );
+        };
 
-          <section className="space-y-3">
-            <h4 className="text-[10px] font-black uppercase tracking-widest border-l-4 border-blue-600 pl-3">Technical Intelligence</h4>
-            <div className={`text-xs font-bold leading-relaxed p-5 rounded-[1.5rem] border ${isDarkMode ? 'bg-[#0c0c0c] border-white/5 text-white/60' : 'bg-white border-gray-100 text-gray-600'}`}>{job.notes}</div>
-          </section>
-
-          <section className="space-y-3">
-             <div className="flex justify-between items-center px-1">
-               <h4 className="text-[10px] font-black uppercase tracking-widest border-l-4 border-blue-600 pl-3">Safety Intelligence</h4>
-               <button onClick={generateSafetyBrief} disabled={isGeneratingSafety} className="flex items-center gap-2 text-[9px] font-black uppercase tracking-widest text-blue-600 bg-blue-600/10 px-3 py-1.5 rounded-lg active:scale-95 transition-all">
-                 {isGeneratingSafety ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
-                 ✨ Generate Protocol
-               </button>
-             </div>
-             
-             {aiSafetyReport ? (
-               <div className={`${cardClass} border-blue-600/30 p-5 rounded-[1.5rem] border animate-in fade-in slide-in-from-bottom-2`}>
-                 <div className="space-y-4">
-                   <div>
-                     <p className="text-[8px] font-black text-blue-600 uppercase tracking-[0.2em] mb-2 flex items-center gap-2"><AlertTriangle size={10} /> Site Precautions</p>
-                     <ul className="space-y-1.5">
-                       {aiSafetyReport.precautions.map((p, i) => (
-                         <li key={i} className="text-[10px] font-bold text-white/70 flex gap-2"><span className="text-blue-600">•</span> {p}</li>
-                       ))}
-                     </ul>
-                   </div>
-                   <div>
-                     <p className="text-[8px] font-black text-blue-600 uppercase tracking-[0.2em] mb-2 flex items-center gap-2"><ShieldCheck size={10} /> Required PPE</p>
-                     <div className="flex flex-wrap gap-2">
-                       {aiSafetyReport.ppe.map((p, i) => (
-                         <span key={i} className="px-2 py-1 bg-white/5 rounded-md text-[9px] font-black uppercase text-white/40">{p}</span>
-                       ))}
-                     </div>
-                   </div>
-                   <div className="pt-3 border-t border-white/5">
-                     <p className="text-[9px] italic text-blue-400">" {aiSafetyReport.pro_tip} "</p>
-                   </div>
-                 </div>
-               </div>
-             ) : !isGeneratingSafety && (
-               <div className={`p-8 text-center border-2 border-dashed rounded-[1.5rem] ${isDarkMode ? 'border-white/5 text-white/10' : 'border-gray-200 text-gray-400'}`}>
-                 <p className="text-[9px] font-black uppercase tracking-widest">Protocol Engine Standby</p>
-               </div>
-             )}
-          </section>
-        </div>
-        <div className={`p-6 border-t shrink-0 ${isDarkMode ? 'bg-black border-white/10' : 'bg-white border-gray-100'}`}>
-           <button disabled={state?.completed} onClick={() => toggleJob(job.id)} className={`w-full py-5 rounded-2xl font-black text-xs uppercase tracking-[0.2em] transition-all shadow-xl ${state?.completed ? 'bg-emerald-500/10 text-emerald-500' : state?.active ? 'bg-white text-black' : 'bg-blue-600 text-white shadow-blue-900/40'}`}>{state?.completed ? 'FILE SUBMITTED' : state?.active ? 'CONTINUE PROTOCOL' : 'MARK ARRIVAL'}</button>
-        </div>
-      </div>
-    );
-  };
-
-  const renderTimesheet = () => (
-    <div className={`h-full flex flex-col ${themeClass}`}>
-      <Header title="Activity Logs" sub="Performance Tracking" />
-      <div className="p-5 space-y-6 overflow-y-auto flex-1">
-        <div className={`${cardClass} p-8 rounded-[2.5rem] border shadow-2xl relative overflow-hidden bg-gradient-to-br from-blue-600 to-indigo-800`}>
-           <div className="relative z-10 text-white">
-             <div className="flex justify-between items-center mb-6"><div className="bg-white/20 p-3 rounded-2xl"><TrendingUp size={24} /></div><div className="text-right"><p className="text-[10px] font-black text-white/60 uppercase tracking-widest">Shift Status</p><p className="text-xs font-bold uppercase">{isClockedIn ? 'In Progress' : 'End of Shift'}</p></div></div>
-             <p className="text-xs font-black text-white/60 uppercase tracking-widest mb-1">Total Daily Logs</p>
-             <h2 className="text-5xl font-black tracking-tighter">{formatDuration(totalShiftTime)}</h2>
-           </div>
-           <Activity size={200} className="absolute -right-16 -bottom-16 text-white/5 pointer-events-none" />
-        </div>
-        <div className="space-y-4">
-          <div className="flex justify-between items-center px-1"><h4 className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-white/30' : 'text-gray-400'}`}>Project Allocations</h4><div className={`p-2 rounded-lg ${isDarkMode ? 'bg-white/5' : 'bg-gray-100'}`}><History size={14} className="text-blue-600" /></div></div>
-          <div className="space-y-3">
-            {MOCK_JOBS.map(job => {
-              const state = jobStates[job.id];
-              if (!state?.time) return null;
-              const typeColor = getJobColor(job.type, 'text');
-              const progress = Math.min(100, (state.time / 10800) * 100);
-              return (
-                <div key={job.id} className={`${cardClass} p-5 rounded-2xl border transition-all hover:scale-[1.01]`}>
-                  <div className="flex justify-between items-center mb-4"><div className="overflow-hidden"><div className="flex items-center gap-2"><span className={`text-[8px] font-black uppercase tracking-widest ${typeColor}`}>{job.jobNumber}</span><span className={`text-[8px] font-black px-1.5 py-0.5 rounded ${isDarkMode ? 'bg-white/10 text-white/40' : 'bg-gray-100 text-gray-500'}`}>{job.type}</span></div><p className="text-sm font-extrabold uppercase mt-1 truncate">{job.customerName}</p></div><div className="text-right"><p className="text-lg font-mono font-black text-blue-600">{formatDuration(state.time)}</p><p className={`text-[8px] font-black uppercase tracking-widest ${isDarkMode ? 'text-white/20' : 'text-gray-400'}`}>Logged</p></div></div>
-                  <div className={`h-1.5 w-full rounded-full overflow-hidden ${isDarkMode ? 'bg-white/5' : 'bg-gray-100'}`}><div className="h-full bg-blue-600 rounded-full" style={{ width: `${progress}%` }}></div></div>
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(
+            <div className="flex items-center justify-center h-screen w-screen p-4">
+                <div className="relative w-full max-w-[400px] aspect-[9/19.5] bg-black rounded-[3.5rem] border-[12px] border-[#1a1a1a] shadow-[0_0_100px_rgba(0,0,0,0.8)] overflow-hidden">
+                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-7 bg-black rounded-b-3xl z-[60]"></div>
+                    <App />
                 </div>
-              );
-            })}
-            {Object.keys(jobStates).filter(id => jobStates[id]?.time).length === 0 && <div className="text-center py-16 px-8 border-2 border-dashed border-white/5 rounded-3xl"><Calendar size={40} className="mx-auto text-white/5 mb-4" /><p className="text-xs font-extrabold text-white/20 uppercase tracking-[0.2em]">Awaiting project logs</p><p className="text-[10px] font-bold text-white/10 uppercase mt-1">Clock into a job to track time</p></div>}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderSettings = () => (
-    <div className={`h-full flex flex-col ${themeClass}`}>
-      <Header title="Preferences" sub="User Profile" />
-      <div className="p-6 space-y-8 overflow-y-auto flex-1">
-        <div className="flex flex-col items-center">
-          <div className="relative group"><div className="w-28 h-28 bg-blue-600 rounded-[2.5rem] flex items-center justify-center border-4 border-blue-600/20 shadow-2xl overflow-hidden">{profile.avatar ? <img src={profile.avatar} className="w-full h-full object-cover" /> : <User size={48} className="text-white" />}</div><button className="absolute -bottom-2 -right-2 w-10 h-10 bg-white text-black rounded-xl border-4 border-black flex items-center justify-center shadow-lg"><Camera size={16} /></button></div>
-          <h3 className="mt-4 text-xl font-black uppercase tracking-tight">{profile.name}</h3><p className="text-[10px] font-black text-blue-600 uppercase tracking-widest">FIELD OPERATOR • {currentUser?.station}</p>
-        </div>
-        <div className="space-y-5">
-           <div className="space-y-2"><label className={`text-[10px] font-black uppercase tracking-widest ml-1 ${isDarkMode ? 'text-white/30' : 'text-gray-400'}`}>Full Identity</label><div className="relative"><User className="absolute left-4 top-1/2 -translate-y-1/2 text-blue-600" size={16} /><input value={profile.name} onChange={e => setProfile({...profile, name: e.target.value})} className={`w-full p-4 pl-12 rounded-2xl font-bold text-sm outline-none border focus:border-blue-600 transition-all ${inputClass}`} /></div></div>
-           <div className="space-y-2"><label className={`text-[10px] font-black uppercase tracking-widest ml-1 ${isDarkMode ? 'text-white/30' : 'text-gray-400'}`}>Direct Phone</label><div className="relative"><Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-blue-600" size={16} /><input value={profile.phone} onChange={e => setProfile({...profile, phone: e.target.value})} className={`w-full p-4 pl-12 rounded-2xl font-bold text-sm outline-none border focus:border-blue-600 transition-all ${inputClass}`} /></div></div>
-           <div className="space-y-2"><label className={`text-[10px] font-black uppercase tracking-widest ml-1 ${isDarkMode ? 'text-white/30' : 'text-gray-400'}`}>Email Address</label><div className="relative"><Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-blue-600" size={16} /><input value={profile.email} onChange={e => setProfile({...profile, email: e.target.value})} className={`w-full p-4 pl-12 rounded-2xl font-bold text-sm outline-none border focus:border-blue-600 transition-all ${inputClass}`} /></div></div>
-        </div>
-        <div className="space-y-4 pt-4"><h4 className={`text-[10px] font-black uppercase tracking-widest border-l-4 border-blue-600 pl-3`}>System UI</h4><div className={`${cardClass} p-5 rounded-[1.5rem] flex items-center justify-between border`}><div className="flex items-center gap-3">{isDarkMode ? <Moon size={18} className="text-blue-600" /> : <Sun size={18} className="text-blue-600" />}<span className="text-xs font-extrabold uppercase tracking-widest">Visual Mode</span></div><button onClick={() => setIsDarkMode(!isDarkMode)} className={`w-14 h-8 rounded-full p-1 transition-all flex ${isDarkMode ? 'bg-blue-600 justify-end' : 'bg-gray-300 justify-start'}`}><div className="w-6 h-6 bg-white rounded-full shadow-md"></div></button></div></div>
-        <button onClick={() => setCurrentScreen('login')} className="w-full py-5 text-red-500 font-black text-xs uppercase tracking-[0.2em] border border-red-500/20 rounded-2xl bg-red-500/5 mt-4 hover:bg-red-500 hover:text-white transition-all">Terminate Session</button>
-      </div>
-    </div>
-  );
-
-  const renderChecklist = () => {
-    const job = selectedJob;
-    if (!job) return null;
-    const currentCompleted = completedItems[job.id] || [];
-    const isReady = currentCompleted.length === CHECKLIST_ITEMS.length;
-    return (
-      <div className={`h-full flex flex-col ${themeClass}`}>
-        <Header title="Site Checklist" sub={job.jobNumber} onBackOverride={() => setActiveChecklistJob(null)} />
-        <div className="p-5 space-y-3 overflow-y-auto flex-1">
-          {CHECKLIST_ITEMS.map(item => {
-            const isDone = currentCompleted.includes(item.id);
-            return (<button key={item.id} onClick={() => setCompletedItems(prev => {
-                const current = prev[job.id] || [];
-                const updated = current.includes(item.id) ? current.filter(i => i !== item.id) : [...current, item.id];
-                return { ...prev, [job.id]: updated };
-              })} className={`w-full p-5 flex items-center gap-4 text-left rounded-2xl border transition-all ${isDone ? 'bg-emerald-500/10 border-emerald-500' : `${cardClass}`}`}><div className={`w-12 h-12 flex items-center justify-center rounded-xl shrink-0 ${isDone ? 'bg-emerald-500 text-white' : 'bg-blue-600/10 text-blue-600'}`}>{isDone ? <CheckCircle2 size={24} /> : item.icon}</div><div className="flex-1 overflow-hidden"><p className={`text-sm font-extrabold uppercase truncate ${isDone ? 'text-emerald-500' : 'text-white'}`}>{item.label}</p><p className={`text-[9px] font-bold uppercase truncate mt-0.5 ${isDarkMode ? 'text-white/20' : 'text-gray-400'}`}>{item.desc}</p></div></button>);
-          })}
-        </div>
-        <div className={`p-6 border-t shrink-0 ${isDarkMode ? 'bg-black border-white/10' : 'bg-white border-gray-100'}`}><button disabled={!isReady} onClick={() => finalizeJob(job.id)} className={`w-full py-5 rounded-2xl font-black text-xs tracking-[0.2em] uppercase transition-all shadow-xl ${isReady ? 'bg-white text-black shadow-white/20 active:scale-95' : 'bg-white/5 text-white/20 cursor-not-allowed'}`}>TRANSMIT FILE</button></div>
-      </div>
-    );
-  };
-
-  const renderChat = () => (
-    <div className={`h-full flex flex-col ${themeClass}`}>
-      <Header title="Comms Hub" sub="Dispatch Center" />
-      <div className="flex-1 p-5 space-y-5 overflow-y-auto">
-         {messages.map(m => (
-           <div key={m.id} className={`flex flex-col ${m.self ? 'items-end' : 'items-start'}`}>
-              <div className={`max-w-[85%] p-4 text-xs font-bold border shadow-md ${m.self ? 'bg-blue-600 border-blue-600 rounded-[1.5rem] rounded-tr-none text-white' : `${cardClass} rounded-[1.5rem] rounded-tl-none`}`}>{m.text}</div>
-              <span className={`text-[8px] font-black mt-2 uppercase tracking-widest ${isDarkMode ? 'text-white/20' : 'text-gray-400'}`}>{m.user} • {m.time}</span>
-           </div>
-         ))}
-         {isAiThinkingChat && (
-           <div className="flex flex-col items-start opacity-50">
-             <div className={`${cardClass} p-4 rounded-[1.5rem] rounded-tl-none`}><Loader2 size={16} className="animate-spin text-blue-600" /></div>
-           </div>
-         )}
-      </div>
-      
-      {/* AI Feature 2: Smart Dispatch Suggestion */}
-      <div className={`px-5 py-2 border-t shrink-0 flex gap-2 overflow-x-auto no-scrollbar ${isDarkMode ? 'bg-black border-white/5' : 'bg-white border-gray-100'}`}>
-        <button onClick={generateAiChatResponse} disabled={isAiThinkingChat} className="whitespace-nowrap px-3 py-2 bg-blue-600/10 text-blue-600 text-[9px] font-black uppercase tracking-widest rounded-lg flex items-center gap-2">
-          <Sparkles size={12} /> ✨ Draft Reply
-        </button>
-      </div>
-
-      <div className={`p-5 border-t flex gap-3 shrink-0 ${isDarkMode ? 'bg-[#0c0c0c] border-white/10' : 'bg-white border-gray-200'}`}>
-         <input value={chatMessage} onChange={e => setChatMessage(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleSendMessage()} placeholder="Type mission status..." className={`flex-1 px-5 py-4 rounded-xl text-xs font-bold outline-none border focus:border-blue-600 transition-all ${inputClass}`} />
-         <button onClick={() => handleSendMessage()} className="w-14 h-14 bg-blue-600 text-white flex items-center justify-center rounded-xl shrink-0 shadow-lg shadow-blue-600/40 active:scale-90 transition-all"><Send size={20} /></button>
-      </div>
-    </div>
-  );
-
-  return (
-    <div className={`min-h-screen transition-colors duration-500 flex items-center justify-center p-4 ${isDarkMode ? 'bg-[#0a0a0a]' : 'bg-gray-200'}`}>
-      <div className={`relative w-full max-w-[400px] aspect-[9/19.5] overflow-hidden shadow-[0_0_100px_rgba(0,0,0,0.5)] rounded-[3.5rem] border-[12px] transition-all duration-500 ${isDarkMode ? 'bg-black border-[#1a1a1a]' : 'bg-white border-gray-900'}`}>
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-7 bg-black rounded-b-3xl z-50"></div>
-        <div className="h-full pt-6">
-          {activeChecklistJob ? renderChecklist() : (
-            <>
-              {currentScreen === 'login' && renderLogin()}
-              {currentScreen === 'dashboard' && renderDashboard()}
-              {currentScreen === 'jobs' && renderJobs()}
-              {currentScreen === 'details' && renderJobDetails()}
-              {currentScreen === 'timesheet' && renderTimesheet()}
-              {currentScreen === 'chat' && renderChat()}
-              {currentScreen === 'settings' && renderSettings()}
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
+            </div>
+        );
+    </script>
+</body>
+</html>
