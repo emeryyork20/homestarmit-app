@@ -33,16 +33,22 @@ const App = () => {
   const [techName, setTechName] = useState("");
   const [assignedVehicle, setAssignedVehicle] = useState(VEHICLES[0]);
   const [jobs, setJobs] = useState([]);
+  const [selectedJob, setSelectedJob] = useState(null);
   
   const [authMode, setAuthMode] = useState('tech'); 
   const [passkey, setPasskey] = useState("");
 
+  // Auth Initialization
   useEffect(() => {
     const initAuth = async () => {
-      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-        await signInWithCustomToken(auth, __initial_auth_token);
-      } else {
-        await signInAnonymously(auth);
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) {
+        console.error("Auth error", err);
       }
     };
     initAuth();
@@ -50,6 +56,7 @@ const App = () => {
     return () => unsubscribe();
   }, []);
 
+  // Real-time Data Listener
   useEffect(() => {
     if (!user || !role) return;
     
@@ -113,7 +120,7 @@ const App = () => {
         <div className="p-6 pt-12 flex justify-between items-center bg-black/50 border-b border-white/5 sticky top-0 z-50 backdrop-blur-md">
           <div>
             <h1 className="text-[10px] font-black tracking-widest text-white/40 uppercase">Command Center</h1>
-            <p className="text-xs font-black text-blue-500 uppercase">Administrator</p>
+            <p className="text-xs font-black text-blue-500 uppercase tracking-tighter">Administrator Portal</p>
           </div>
           <button onClick={logout} className="w-10 h-10 rounded-xl bg-red-500/10 text-red-500 flex items-center justify-center transition-colors hover:bg-red-500/20">
             <LogOut size={18} />
@@ -123,80 +130,84 @@ const App = () => {
         <div className="p-6 space-y-8">
           <div className={`${GLASS_PANEL} p-6 space-y-4`}>
             <h3 className="text-[10px] font-black tracking-[0.2em] text-blue-500 flex items-center gap-2 uppercase">
-              <Plus size={14} /> New Dispatch Protocol
+              <Plus size={14} /> Dispatch New Unit
             </h3>
             
-            <div className="space-y-3">
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <Hash size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20" />
-                  <input 
-                    placeholder="JOB #" 
-                    className="w-full bg-black/40 border border-white/10 rounded-xl p-4 pl-12 text-[10px] font-bold uppercase tracking-widest focus:border-blue-500 outline-none"
-                    value={newJob.jobNumber}
-                    onChange={e => setNewJob({...newJob, jobNumber: e.target.value})}
-                  />
-                </div>
-                <select 
-                  className="bg-black/40 border border-white/10 rounded-xl px-4 text-[10px] font-bold uppercase outline-none focus:border-blue-500"
-                  value={newJob.vehicle}
-                  onChange={e => setNewJob({...newJob, vehicle: e.target.value})}
-                >
-                  {VEHICLES.map(v => <option key={v} value={v}>{v}</option>)}
-                </select>
-              </div>
-
-              <input 
-                placeholder="CLIENT NAME" 
-                className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-[10px] font-bold uppercase tracking-widest outline-none"
-                value={newJob.client}
-                onChange={e => setNewJob({...newJob, client: e.target.value})}
-              />
-              <input 
-                placeholder="SITE ADDRESS" 
-                className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-[10px] font-bold uppercase tracking-widest outline-none"
-                value={newJob.address}
-                onChange={e => setNewJob({...newJob, address: e.target.value})}
-              />
-              <div className="flex gap-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="relative">
+                <Hash size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20" />
                 <input 
-                  placeholder="PHONE" 
-                  className="flex-1 bg-black/40 border border-white/10 rounded-xl p-4 text-[10px] font-bold uppercase tracking-widest outline-none"
-                  value={newJob.phone}
-                  onChange={e => setNewJob({...newJob, phone: e.target.value})}
+                  placeholder="JOB #" 
+                  className="w-full bg-black/40 border border-white/10 rounded-xl p-4 pl-12 text-[10px] font-bold uppercase tracking-widest focus:border-blue-500 outline-none"
+                  value={newJob.jobNumber}
+                  onChange={e => setNewJob({...newJob, jobNumber: e.target.value.toUpperCase()})}
                 />
-                <select 
-                  className="bg-black/40 border border-white/10 rounded-xl px-4 text-[10px] font-bold uppercase outline-none"
-                  value={newJob.type}
-                  onChange={e => setNewJob({...newJob, type: e.target.value})}
-                >
-                  <option>WTR</option><option>FIRE</option><option>MOLD</option><option>BIO</option>
-                </select>
               </div>
-              <button 
-                onClick={publishJob}
-                className="w-full py-4 bg-blue-600 rounded-xl font-black text-[10px] tracking-widest uppercase active:scale-95 shadow-lg shadow-blue-900/20"
+              <select 
+                className="bg-black/40 border border-white/10 rounded-xl px-4 text-[10px] font-bold uppercase outline-none focus:border-blue-500 appearance-none"
+                value={newJob.vehicle}
+                onChange={e => setNewJob({...newJob, vehicle: e.target.value})}
               >
-                Broadcast to {newJob.vehicle}
-              </button>
+                {VEHICLES.map(v => <option key={v} value={v} className="bg-black text-white">{v}</option>)}
+              </select>
             </div>
+
+            <input 
+              placeholder="CLIENT NAME" 
+              className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-[10px] font-bold uppercase tracking-widest outline-none focus:border-blue-500"
+              value={newJob.client}
+              onChange={e => setNewJob({...newJob, client: e.target.value.toUpperCase()})}
+            />
+            <input 
+              placeholder="SITE ADDRESS" 
+              className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-[10px] font-bold uppercase tracking-widest outline-none focus:border-blue-500"
+              value={newJob.address}
+              onChange={e => setNewJob({...newJob, address: e.target.value.toUpperCase()})}
+            />
+            
+            <div className="grid grid-cols-2 gap-3">
+              <input 
+                placeholder="PHONE" 
+                className="bg-black/40 border border-white/10 rounded-xl p-4 text-[10px] font-bold uppercase tracking-widest outline-none focus:border-blue-500"
+                value={newJob.phone}
+                onChange={e => setNewJob({...newJob, phone: e.target.value})}
+              />
+              <select 
+                className="bg-black/40 border border-white/10 rounded-xl px-4 text-[10px] font-bold uppercase outline-none focus:border-blue-500 appearance-none"
+                value={newJob.type}
+                onChange={e => setNewJob({...newJob, type: e.target.value})}
+              >
+                <option className="bg-black">WTR</option>
+                <option className="bg-black">FIRE</option>
+                <option className="bg-black">MOLD</option>
+                <option className="bg-black">BIO</option>
+              </select>
+            </div>
+
+            <button 
+              onClick={publishJob}
+              className="w-full py-4 bg-blue-600 rounded-xl font-black text-[10px] tracking-widest uppercase active:scale-95 shadow-lg shadow-blue-900/20"
+            >
+              Broadcast Dispatch
+            </button>
           </div>
 
           <div className="space-y-4">
             <h3 className="text-[10px] font-black tracking-widest text-white/20 px-2 flex items-center gap-2 uppercase">
-              <Database size={14} /> Global Feed
+              <Database size={14} /> Active Fleet Logs
             </h3>
             {jobs.sort((a,b) => b.timestamp - a.timestamp).map(job => (
               <div key={job.id} className={`${GLASS_PANEL} p-5 flex justify-between items-center group`}>
                 <div className="flex gap-4 items-center">
-                  <div className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center text-[8px] font-black text-blue-500 border border-white/5">
+                  <div className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center text-[10px] font-black text-blue-500 border border-white/5">
                     {job.vehicle?.split(' ')[1]}
                   </div>
                   <div>
-                    <p className="text-[8px] font-black text-blue-500 uppercase tracking-tighter">
-                      {job.jobNumber} • {job.type} • {job.vehicle}
-                    </p>
-                    <h4 className="text-[11px] font-black uppercase mt-0.5">{job.client}</h4>
+                    <div className="flex gap-2 items-center">
+                      <p className="text-[9px] font-black text-blue-500 uppercase">{job.vehicle}</p>
+                      <span className="text-[7px] bg-white/10 px-2 py-0.5 rounded-full">{job.jobNumber}</span>
+                    </div>
+                    <h4 className="text-[12px] font-black uppercase mt-0.5">{job.client}</h4>
                   </div>
                 </div>
                 <button 
@@ -215,12 +226,11 @@ const App = () => {
 
   // --- TECH PORTAL ---
   const TechPortal = () => {
-    // Filter jobs for this specific vehicle
     const myJobs = jobs.filter(j => j.vehicle === assignedVehicle);
 
     if (screen === 'dashboard') {
       return (
-        <div className="min-h-screen bg-black text-white">
+        <div className="min-h-screen bg-[#050505] text-white">
           <div className="p-6 pt-12 flex justify-between items-center bg-black/50 border-b border-white/5 sticky top-0 z-50 backdrop-blur-md">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-blue-600/10 rounded-xl flex items-center justify-center text-blue-500 border border-blue-500/20">
@@ -240,11 +250,11 @@ const App = () => {
             <div className={`${GLASS_PANEL} p-8 relative overflow-hidden bg-gradient-to-br from-blue-600/20 to-transparent`}>
               <div className="relative z-10">
                 <p className="text-[9px] font-black text-white/40 uppercase tracking-widest mb-4 flex items-center gap-2">
-                  <Clock size={12} className="text-blue-500" /> Operational Shift
+                  <Clock size={12} className="text-blue-500" /> Active Session
                 </p>
-                <h2 className="text-5xl font-black tracking-tighter mb-4 font-mono">00:00:00</h2>
+                <h2 className="text-5xl font-black tracking-tighter mb-4 font-mono">02:14:38</h2>
                 <div className="flex gap-4">
-                  <span className="text-[10px] font-black text-blue-500 bg-blue-500/10 px-3 py-1 rounded-full border border-blue-500/20">STATUS: ACTIVE</span>
+                  <span className="text-[10px] font-black text-blue-500 bg-blue-500/10 px-3 py-1 rounded-full border border-blue-500/20">STATUS: ON-CALL</span>
                 </div>
               </div>
               <Activity size={140} className="absolute -right-8 -bottom-8 text-blue-500/[0.05] rotate-12" />
@@ -259,14 +269,25 @@ const App = () => {
                   <Briefcase size={22} />
                 </div>
                 <div className="text-left">
-                  <h3 className="text-xs font-black uppercase">Active Dispatch</h3>
-                  <p className="text-[9px] text-white/40 uppercase">{myJobs.length} Assigned to {assignedVehicle}</p>
+                  <h3 className="text-xs font-black uppercase">Job Dispatch Queue</h3>
+                  <p className="text-[9px] text-white/40 uppercase">{myJobs.length} Tickets Found</p>
                 </div>
               </div>
               <div className="w-10 h-10 bg-white/5 group-hover:bg-blue-600 transition-colors rounded-full flex items-center justify-center text-xs font-black">
                 {myJobs.length}
               </div>
             </button>
+
+            <div className="grid grid-cols-2 gap-4 mt-2">
+               <div className={`${GLASS_PANEL} p-5 flex flex-col items-center text-center`}>
+                  <Calendar size={20} className="text-blue-500 mb-2" />
+                  <span className="text-[9px] font-black uppercase tracking-widest">Schedule</span>
+               </div>
+               <div className={`${GLASS_PANEL} p-5 flex flex-col items-center text-center`}>
+                  <Settings size={20} className="text-white/20 mb-2" />
+                  <span className="text-[9px] font-black uppercase tracking-widest">Settings</span>
+               </div>
+            </div>
           </div>
         </div>
       );
@@ -274,62 +295,96 @@ const App = () => {
 
     if (screen === 'jobs') {
       return (
-        <div className="min-h-screen bg-black text-white pb-10">
+        <div className="min-h-screen bg-black text-white pb-10 flex flex-col">
           <div className="p-6 pt-12 flex items-center gap-4 bg-black border-b border-white/5 sticky top-0 z-50">
             <button onClick={() => setScreen('dashboard')} className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center">
               <ArrowLeft size={18} />
             </button>
-            <h1 className="text-xs font-black uppercase tracking-widest">Job Queue: {assignedVehicle}</h1>
+            <h1 className="text-xs font-black uppercase tracking-widest">{assignedVehicle} Dispatch Feed</h1>
           </div>
           
-          <div className="p-6 space-y-6">
+          <div className="p-6 space-y-4 flex-1">
             {myJobs.length === 0 ? (
               <div className="text-center py-20 opacity-20">
                 <Briefcase size={40} className="mx-auto mb-4" />
                 <p className="text-[10px] font-black uppercase tracking-widest">No active dispatches</p>
               </div>
             ) : myJobs.map(job => (
-              <div key={job.id} className={`${GLASS_PANEL} p-0 overflow-hidden border-blue-500/20`}>
-                <div className="p-6 space-y-4">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <div className="flex gap-2 mb-2">
-                        <span className="text-[8px] font-black bg-blue-600 text-white px-2 py-0.5 rounded-full uppercase tracking-widest">{job.jobNumber}</span>
-                        <span className="text-[8px] font-black bg-white/10 text-white/60 px-2 py-0.5 rounded-full uppercase tracking-widest">{job.type}</span>
-                      </div>
-                      <h3 className="text-xl font-black uppercase tracking-tighter leading-none">{job.client}</h3>
+              <div 
+                key={job.id} 
+                className={`${GLASS_PANEL} p-0 overflow-hidden border-blue-500/20 active:bg-white/5 transition-colors cursor-pointer`}
+                onClick={() => setSelectedJob(job)}
+              >
+                <div className="p-6">
+                  <div className="flex justify-between items-start mb-3">
+                    <div className="flex gap-2">
+                      <span className="text-[8px] font-black bg-blue-600 text-white px-2 py-0.5 rounded-full uppercase">{job.jobNumber}</span>
+                      <span className="text-[8px] font-black bg-white/10 text-white/60 px-2 py-0.5 rounded-full uppercase">{job.type}</span>
                     </div>
+                    <ChevronRight size={16} className="text-white/20" />
                   </div>
-                  
-                  <div className="space-y-3">
-                    <div className="flex items-start gap-3 text-white/50">
-                      <MapPin size={14} className="text-blue-500 mt-1 shrink-0" />
-                      <p className="text-[11px] font-bold uppercase leading-tight">{job.address}</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 border-t border-white/5 h-16">
-                  <a 
-                    href={`https://maps.google.com?q=${encodeURIComponent(job.address)}`} 
-                    target="_blank" 
-                    rel="noreferrer"
-                    className="flex items-center justify-center gap-2 border-r border-white/5 hover:bg-white/5 active:bg-blue-600 transition-colors"
-                  >
-                    <Navigation size={16} className="text-blue-500" />
-                    <span className="text-[9px] font-black uppercase tracking-widest">Start Route</span>
-                  </a>
-                  <a 
-                    href={`tel:${job.phone}`}
-                    className="flex items-center justify-center gap-2 hover:bg-white/5 active:bg-green-600 transition-colors"
-                  >
-                    <Phone size={16} className="text-green-500" />
-                    <span className="text-[9px] font-black uppercase tracking-widest">Call Client</span>
-                  </a>
+                  <h3 className="text-xl font-black uppercase tracking-tighter mb-1">{job.client}</h3>
+                  <p className="text-[11px] font-bold text-white/50 uppercase leading-tight truncate">{job.address}</p>
                 </div>
               </div>
             ))}
           </div>
+
+          {/* Job Detail Modal Overlay */}
+          {selectedJob && (
+            <div className="fixed inset-0 z-[100] bg-black p-6 flex flex-col pt-16 animate-in slide-in-from-bottom-8 duration-300">
+               <button 
+                onClick={() => setSelectedJob(null)}
+                className="absolute top-8 left-6 w-10 h-10 bg-white/10 rounded-full flex items-center justify-center"
+               >
+                 <ArrowLeft size={20} />
+               </button>
+               
+               <div className="mt-12 space-y-8">
+                  <div>
+                    <p className="text-blue-500 font-black text-[10px] tracking-widest mb-1">ACTIVE ASSIGNMENT</p>
+                    <h2 className="text-4xl font-black uppercase tracking-tighter">{selectedJob.client}</h2>
+                    <p className="text-white/40 text-sm font-bold mt-2">Job Number: {selectedJob.jobNumber}</p>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="bg-white/5 rounded-3xl p-6 border border-white/5">
+                      <p className="text-[9px] font-black text-white/20 uppercase tracking-widest mb-2">Location</p>
+                      <p className="text-lg font-bold uppercase leading-tight">{selectedJob.address}</p>
+                    </div>
+
+                    <div className="bg-white/5 rounded-3xl p-6 border border-white/5">
+                      <p className="text-[9px] font-black text-white/20 uppercase tracking-widest mb-2">Primary Contact</p>
+                      <p className="text-lg font-bold uppercase">{selectedJob.phone || 'No Phone Provided'}</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <a 
+                      href={`https://maps.google.com?q=${encodeURIComponent(selectedJob.address)}`} 
+                      className="bg-blue-600 h-24 rounded-3xl flex flex-col items-center justify-center gap-2 active:scale-95 transition-transform"
+                    >
+                      <Navigation size={24} />
+                      <span className="text-[10px] font-black uppercase tracking-widest">Route GPS</span>
+                    </a>
+                    <a 
+                      href={`tel:${selectedJob.phone}`}
+                      className="bg-green-600 h-24 rounded-3xl flex flex-col items-center justify-center gap-2 active:scale-95 transition-transform"
+                    >
+                      <Phone size={24} />
+                      <span className="text-[10px] font-black uppercase tracking-widest">Call Client</span>
+                    </a>
+                  </div>
+
+                  <button 
+                    onClick={() => setSelectedJob(null)}
+                    className="w-full py-5 border border-white/10 rounded-2xl text-[10px] font-black text-white/40 uppercase tracking-widest"
+                  >
+                    Back to Queue
+                  </button>
+               </div>
+            </div>
+          )}
         </div>
       );
     }
@@ -342,16 +397,16 @@ const App = () => {
         <div className="text-center mb-12">
           <p className="text-[10px] font-black tracking-[0.8em] text-blue-500 uppercase mb-2">THE</p>
           <h1 className="text-4xl font-black tracking-widest leading-none italic mb-4">HOMESTAR<br/>GROUP</h1>
-          <div className="flex gap-2 justify-center">
+          <div className="flex gap-2 justify-center bg-white/5 p-1 rounded-full border border-white/10">
             <button 
               onClick={() => setAuthMode('tech')}
-              className={`px-4 py-2 rounded-full text-[8px] font-black uppercase tracking-widest transition-all ${authMode === 'tech' ? 'bg-blue-600' : 'bg-white/5 text-white/40'}`}
+              className={`px-6 py-2 rounded-full text-[8px] font-black uppercase tracking-widest transition-all ${authMode === 'tech' ? 'bg-blue-600' : 'text-white/40'}`}
             >
               Field Tech
             </button>
             <button 
               onClick={() => setAuthMode('admin')}
-              className={`px-4 py-2 rounded-full text-[8px] font-black uppercase tracking-widest transition-all ${authMode === 'admin' ? 'bg-blue-600' : 'bg-white/5 text-white/40'}`}
+              className={`px-6 py-2 rounded-full text-[8px] font-black uppercase tracking-widest transition-all ${authMode === 'admin' ? 'bg-blue-600' : 'text-white/40'}`}
             >
               Admin
             </button>
@@ -365,7 +420,7 @@ const App = () => {
                 <User size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20" />
                 <input 
                   placeholder="OPERATOR NAME" 
-                  className="w-full py-4 pl-12 pr-6 bg-white/5 border border-white/10 rounded-2xl text-[10px] font-black tracking-widest uppercase outline-none focus:border-blue-500"
+                  className="w-full py-4 pl-12 pr-6 bg-white/5 border border-white/10 rounded-2xl text-[10px] font-black tracking-widest uppercase outline-none focus:border-blue-500 transition-colors"
                   value={techName}
                   onChange={e => setTechName(e.target.value.toUpperCase())}
                 />
@@ -373,11 +428,11 @@ const App = () => {
               <div className="relative">
                 <Truck size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20" />
                 <select 
-                  className="w-full py-4 pl-12 pr-6 bg-white/5 border border-white/10 rounded-2xl text-[10px] font-black tracking-widest uppercase outline-none appearance-none focus:border-blue-500"
+                  className="w-full py-4 pl-12 pr-6 bg-white/5 border border-white/10 rounded-2xl text-[10px] font-black tracking-widest uppercase outline-none appearance-none focus:border-blue-500 transition-colors"
                   value={assignedVehicle}
                   onChange={e => setAssignedVehicle(e.target.value)}
                 >
-                  {VEHICLES.map(v => <option key={v} value={v}>{v}</option>)}
+                  {VEHICLES.map(v => <option key={v} value={v} className="bg-black text-white">{v}</option>)}
                 </select>
               </div>
             </>
@@ -387,7 +442,7 @@ const App = () => {
               <input 
                 type="password"
                 placeholder="ADMIN PASSKEY" 
-                className="w-full py-4 pl-12 pr-6 bg-white/5 border border-white/10 rounded-2xl text-[10px] font-black tracking-widest uppercase outline-none focus:border-blue-500"
+                className="w-full py-4 pl-12 pr-6 bg-white/5 border border-white/10 rounded-2xl text-[10px] font-black tracking-widest uppercase outline-none focus:border-blue-500 transition-colors"
                 value={passkey}
                 onChange={e => setPasskey(e.target.value)}
               />
@@ -400,14 +455,14 @@ const App = () => {
           >
             Authenticate
           </button>
-          <p className="text-[8px] text-white/20 text-center uppercase font-black mt-4">Restricted Access • Secure Session</p>
+          <p className="text-[8px] text-white/20 text-center uppercase font-black mt-6 tracking-widest">Restricted Access • Homestar Net v4.0</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-md mx-auto min-h-screen bg-black relative">
+    <div className="max-w-md mx-auto min-h-screen bg-black relative shadow-2xl">
       {role === 'admin' ? <AdminPortal /> : <TechPortal />}
     </div>
   );
